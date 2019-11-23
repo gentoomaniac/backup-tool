@@ -1,12 +1,13 @@
 package main
 
 import (
-	"fmt"
-	"log"
+	"encoding/base64"
 	"os"
-	"plugin"
+
+	"./lib/crypt/aes256"
 
 	"github.com/alecthomas/kingpin"
+	log "github.com/sirupsen/logrus"
 )
 
 func getenvDefault(name string, defaultValue string) string {
@@ -17,70 +18,36 @@ func getenvDefault(name string, defaultValue string) string {
 	return value
 }
 
-type EncryptionPluginIface interface {
-	Encrypt(cleartext []byte, args ...interface{}) (ciphertext []byte, err error)
-	Decrypt(ciphertext []byte, args ...interface{}) (cleartext []byte, err error)
-	Description() (pluginDescription string)
-}
-
-type encryptionPlugin struct {
-	name        string
-	encrypt     func(cleartext []byte, args ...interface{}) []byte
-	decrypt     func(ciphertext []byte, args ...interface{}) []byte
-	description func() string
-	object      *plugin.Plugin
-}
-
-var encryptionPlugins []*encryptionPlugin
-
-func loadEncPlugin(path string) (p *encryptionPlugin) {
-	obj, err := plugin.Open(path)
-	if err != nil {
-		log.Fatal(err)
-		panic(err)
-	}
-	encryptFunc, err := obj.Lookup("Encrypt")
-	if err != nil {
-		log.Fatal(err)
-		panic(err)
-	}
-	decryptFunc, err := obj.Lookup("Decrypt")
-	if err != nil {
-		log.Fatal(err)
-		panic(err)
-	}
-	descriptionFunc, err := obj.Lookup("Description")
-	if err != nil {
-		log.Fatal(err)
-		panic(err)
-	}
-
-	p = new(encryptionPlugin)
-	p.name = path
-	p.object = obj
-	p.encrypt = encryptFunc.(func([]byte, ...interface{}) []byte)
-	p.decrypt = decryptFunc.(func([]byte, ...interface{}) []byte)
-	p.description = descriptionFunc.(func() string)
-
-	return p
+func init() {
+	log.SetFormatter(&log.JSONFormatter{})
+	log.SetLevel(log.DebugLevel)
 }
 
 var (
 	verbose = kingpin.Flag("verbose", "Verbose mode.").Short('v').Bool()
-	plugins = kingpin.Flag("enc", "Load the specified plugin").Short('e').Strings()
 )
 
 func main() {
 	kingpin.Version("0.0.1")
 	kingpin.Parse()
 
-	encryptionPlugins = make([]*encryptionPlugin, 0)
+	iv, _ := aes256.GenerateIV()
+	log.WithFields(log.Fields{
+		"iv": base64.StdEncoding.EncodeToString(iv),
+	}).Debug("iv generated")
 
-	for _, path := range *plugins {
-		var p = loadEncPlugin(path)
-		encryptionPlugins = append(encryptionPlugins, p)
-		fmt.Print(string(p.encrypt(make([]byte, 0))))
-		fmt.Print(string(p.decrypt(make([]byte, 0))))
-		fmt.Print(p.description())
-	}
+	secret, _ := aes256.GenerateSecret()
+	log.WithFields(log.Fields{
+		"secret": base64.StdEncoding.EncodeToString(secret),
+	}).Debug("secret generated")
+
+	encrypted, _ := aes256.Encrypt([]byte("Hello, World!"), secret, iv)
+	log.WithFields(log.Fields{
+		"encrypted": base64.StdEncoding.EncodeToString(encrypted),
+	}).Debug("text encrypted")
+
+	decrypted, _ := aes256.Decrypt(encrypted, secret, iv)
+	log.WithFields(log.Fields{
+		"decrypted": string(decrypted),
+	}).Debug("text decrypted")
 }
