@@ -2,21 +2,12 @@ package main
 
 import (
 	"encoding/base64"
-	"os"
 
 	"./lib/crypt/aes256"
 
 	"github.com/alecthomas/kingpin"
 	log "github.com/sirupsen/logrus"
 )
-
-func getenvDefault(name string, defaultValue string) string {
-	value := os.Getenv(name)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
 
 func init() {
 	log.SetFormatter(&log.JSONFormatter{})
