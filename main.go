@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 
 	"./lib/crypt/aes256"
-	"./model"
 
 	"github.com/alecthomas/kingpin"
+	"github.com/gentoomaniac/backup-tool/src/model"
 	log "github.com/sirupsen/logrus"
 )
 
