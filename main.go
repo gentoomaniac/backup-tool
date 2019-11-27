@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -119,10 +118,4 @@ func main() {
 	filemeta.Hash = hash[:]
 	log.Debugf("File hash: %x", filemeta.Hash)
 	log.Debugf("Filse size: %d", filesize)
-
-	file.Seek(0, 0)
-	hasher := sha256.New()
-	bytesCopied, _ := io.Copy(hasher, file)
-	log.Debugf("File hash: %x", hasher.Sum(nil))
-	log.Debugf("Filse size: %d", bytesCopied)
 }
