@@ -21,8 +21,9 @@ func init() {
 }
 
 var (
-	verbose = kingpin.Flag("verbose", "Verbose mode.").Short('v').Bool()
-	file    = kingpin.Arg("file", "File to hash").Required().ExistingFile()
+	verbose   = kingpin.Flag("verbose", "Verbose mode.").Short('v').Bool()
+	blocksize = kingpin.Flag("blocksize", "Data block size in bytes").Short('b').Default("52428800").Int()
+	file      = kingpin.Arg("file", "File to hash").Required().ExistingFile()
 )
 
 func main() {
