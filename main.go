@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"path/filepath"
 
-	"./lib/crypt/aes256"
+	local "./lib/output"
+	"github.com/gentoomaniac/backup-tool/src/lib/crypt/aes256"
 
 	"github.com/alecthomas/kingpin"
 	"github.com/gentoomaniac/backup-tool/src/model"
@@ -82,7 +82,6 @@ func main() {
 	filehasher := sha256.New()
 	filemeta := &model.FSObject{}
 	filesize := 0
-	cwd, _ := os.Getwd()
 	var buffer = make([]byte, blocksize)
 
 	for {
@@ -100,13 +99,11 @@ func main() {
 
 		filehasher.Write(data)
 
-		blockfile, err := os.Create(filepath.Join(cwd, string(hex.EncodeToString(hash[:]))))
-		if err != nil {
-			log.Error(err)
-			return
-		}
-		defer blockfile.Close()
-		blockbytes, _ := blockfile.Write(data)
+		encryptedData, _ := aes256.Encrypt(data, secret, iv)
+		blockbytes, err := local.Write(&model.Block{
+			Hash: hash[:],
+			Data: encryptedData,
+		}, "/home/marco/git-private/backup-tool/blocks")
 
 		log.Debugf("bytes read: %d", bytesread)
 		log.Debugf("block hash: %x", hash)
