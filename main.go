@@ -4,16 +4,22 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 
-	local "./lib/output"
-	"github.com/gentoomaniac/backup-tool/src/lib/crypt/aes256"
+	aes256 "github.com/gentoomaniac/backup-tool/lib/crypt"
+	local "github.com/gentoomaniac/backup-tool/lib/output"
+	"github.com/gentoomaniac/backup-tool/model"
 
 	"github.com/alecthomas/kingpin"
-	"github.com/gentoomaniac/backup-tool/src/model"
 	log "github.com/sirupsen/logrus"
 )
+
+type config struct {
+	BlockPath string
+	BlockSize int
+}
 
 func init() {
 	log.SetFormatter(&log.JSONFormatter{})
@@ -24,29 +30,46 @@ var (
 	verbose   = kingpin.Flag("verbose", "Verbose mode.").Short('v').Bool()
 	blocksize = kingpin.Flag("blocksize", "Data block size in bytes").Short('b').Default("52428800").Int()
 	file      = kingpin.Arg("file", "File to hash").Required().ExistingFile()
+	secret    = kingpin.Flag("secret", "Base64 encoded secret").Short('s').String()
+	nonce     = kingpin.Flag("nonce", "Base64 encoded nonce").Short('n').String()
 )
 
 func main() {
 	kingpin.Version("0.0.1")
 	kingpin.Parse()
 
+	config := &config{
+		BlockPath: "/home/marco/git-private/backup-tool/blocks",
+		BlockSize: 52428800,
+	}
+
 	// encryption / decryption
-	iv, _ := aes256.GenerateIV()
+	var iv []byte
+	if *nonce == "" {
+		iv, _ = aes256.GenerateIV()
+	} else {
+		iv, _ = base64.StdEncoding.DecodeString(*nonce)
+	}
 	log.WithFields(log.Fields{
 		"iv": base64.StdEncoding.EncodeToString(iv),
-	}).Debug("iv generated")
+	}).Debug("iv loaded")
 
-	secret, _ := aes256.GenerateSecret()
+	var secretBytes []byte
+	if *secret == "" {
+		secretBytes, _ = aes256.GenerateSecret()
+	} else {
+		secretBytes, _ = base64.StdEncoding.DecodeString(*secret)
+	}
 	log.WithFields(log.Fields{
-		"secret": base64.StdEncoding.EncodeToString(secret),
-	}).Debug("secret generated")
+		"secret": base64.StdEncoding.EncodeToString(secretBytes),
+	}).Debug("secret loaded")
 
-	encrypted, _ := aes256.Encrypt([]byte("Hello, World!"), secret, iv)
+	encrypted, _ := aes256.Encrypt([]byte("Hello, World!"), secretBytes, iv)
 	log.WithFields(log.Fields{
 		"encrypted": base64.StdEncoding.EncodeToString(encrypted),
 	}).Debug("text encrypted")
 
-	decrypted, _ := aes256.Decrypt(encrypted, secret, iv)
+	decrypted, _ := aes256.Decrypt(encrypted, secretBytes, iv)
 	log.WithFields(log.Fields{
 		"decrypted": string(decrypted),
 	}).Debug("text decrypted")
@@ -70,9 +93,7 @@ func main() {
 	log.Debug(fm.Sys())
 
 	// read file into data structs
-	// 50MB
-	var blocksize = 52428800
-	var blockIndex = make(map[string][]byte)
+	var blockIndex = make(map[string]*model.BlockMeta)
 
 	file, err := os.Open(*file)
 	if err != nil {
@@ -84,7 +105,8 @@ func main() {
 	filehasher := sha256.New()
 	filemeta := &model.FSObject{}
 	filesize := 0
-	var buffer = make([]byte, blocksize)
+	var buffer = make([]byte, config.BlockSize)
+	var blockbytes int
 
 	for {
 		bytesread, err := file.Read(buffer)
@@ -96,23 +118,28 @@ func main() {
 
 		data := buffer[:bytesread]
 
+		blockSecret, _ := aes256.GenerateSecret()
 		hash := sha256.Sum256(data)
-		block := &model.Block{
-			Hash:     hash[:],
-			Name:     aes256.Encrypt(hash[:], secret, iv),
-			Password: secret,
-			Size:     len(data),
+		encryptedHash, _ := aes256.Encrypt(hash[:], blockSecret, iv)
+		blockMetadata := &model.BlockMeta{
+			Hash:   hash[:],
+			Name:   []byte(base64.StdEncoding.EncodeToString(encryptedHash)),
+			Secret: blockSecret,
+			Size:   len(data),
 		}
-		blockIndex[hex.EncodeToString(hash[:])] = data
-
 		filehasher.Write(data)
 
-		encryptedData, _ := aes256.Encrypt(data, secret, iv)
-		blockbytes, err := local.Write(block, "/home/marco/git-private/backup-tool/blocks")
+		encryptedData, _ := aes256.Encrypt(data, blockSecret, iv)
+		if _, ok := blockIndex[hex.EncodeToString(hash[:])]; !ok {
+			blockbytes, _ = local.Write(encryptedData, blockMetadata, "/home/marco/git-private/backup-tool/blocks")
+			blockIndex[hex.EncodeToString(hash[:])] = blockMetadata
+		}
 
 		log.Debugf("bytes read: %d", bytesread)
 		log.Debugf("block hash: %x", hash)
 		log.Debugf("bytes written: %d", blockbytes)
+		json, _ := json.Marshal(blockMetadata)
+		fmt.Print(string(json))
 
 	}
 
@@ -120,4 +147,14 @@ func main() {
 	filemeta.Hash = hash[:]
 	log.Debugf("File hash: %x", filemeta.Hash)
 	log.Debugf("Filse size: %d", filesize)
+
+	blockIndexFile, err := os.Create("blockindex.json")
+	if err != nil {
+		log.Error(err)
+	}
+	defer blockIndexFile.Close()
+	jsonBlockIndex, _ := json.Marshal(blockIndex)
+	blockIndexFile.WriteString(string(jsonBlockIndex))
+	fmt.Print(string(jsonBlockIndex))
+
 }
