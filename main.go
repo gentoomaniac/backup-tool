@@ -6,19 +6,22 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 
 	aes256 "github.com/gentoomaniac/backup-tool/lib/crypt"
 	local "github.com/gentoomaniac/backup-tool/lib/output"
 	"github.com/gentoomaniac/backup-tool/model"
+	"github.com/hprose/hprose-go"
 
 	"github.com/alecthomas/kingpin"
 	log "github.com/sirupsen/logrus"
 )
 
 type config struct {
-	BlockPath string
-	BlockSize int
+	BlockPath  string
+	BlockSize  int
+	BlockIndex string
 }
 
 func init() {
@@ -26,12 +29,45 @@ func init() {
 	log.SetLevel(log.DebugLevel)
 }
 
+func saveBlockIndex(path string, blockindex map[string]*model.BlockMeta) (bytesWritten int, err error) {
+	serialized, err := hprose.Serialize(blockindex, true)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+	blockIndexFile, err := os.Create(path)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+	defer blockIndexFile.Close()
+	bytesWritten, err = blockIndexFile.Write(serialized)
+
+	return
+}
+
+func loadlockIndex(path string, blockindex *map[string]*model.BlockMeta) (err error) {
+	raw, err := ioutil.ReadFile(path)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	err = hprose.Unserialize(raw, blockindex, true)
+	if err != nil {
+		log.Error(err)
+	}
+
+	return
+}
+
 var (
-	verbose   = kingpin.Flag("verbose", "Verbose mode.").Short('v').Bool()
-	blocksize = kingpin.Flag("blocksize", "Data block size in bytes").Short('b').Default("52428800").Int()
-	file      = kingpin.Arg("file", "File to hash").Required().ExistingFile()
-	secret    = kingpin.Flag("secret", "Base64 encoded secret").Short('s').String()
-	nonce     = kingpin.Flag("nonce", "Base64 encoded nonce").Short('n').String()
+	verbose    = kingpin.Flag("verbose", "Verbose mode.").Short('v').Bool()
+	blocksize  = kingpin.Flag("blocksize", "Data block size in bytes").Short('b').Default("52428800").Int()
+	blockindex = kingpin.Flag("blockindex", "Saved block index").Short('i').Default("blockindex").String()
+	file       = kingpin.Arg("file", "File to hash").Required().ExistingFile()
+	secret     = kingpin.Flag("secret", "Base64 encoded secret").Short('s').String()
+	nonce      = kingpin.Flag("nonce", "Base64 encoded nonce").Short('n').String()
 )
 
 func main() {
@@ -39,8 +75,9 @@ func main() {
 	kingpin.Parse()
 
 	config := &config{
-		BlockPath: "/home/marco/git-private/backup-tool/blocks",
-		BlockSize: 52428800,
+		BlockPath:  "/home/marco/git-private/backup-tool/blocks",
+		BlockSize:  52428800,
+		BlockIndex: *blockindex,
 	}
 
 	// encryption / decryption
@@ -94,6 +131,12 @@ func main() {
 
 	// read file into data structs
 	var blockIndex = make(map[string]*model.BlockMeta)
+	err := loadlockIndex(config.BlockIndex, &blockIndex)
+	if err != nil {
+		log.Warnf("Couldn't open block index: %s", err)
+	}
+	jsonBlockIndex, _ := json.Marshal(blockIndex)
+	fmt.Print(string(jsonBlockIndex))
 
 	file, err := os.Open(*file)
 	if err != nil {
@@ -148,13 +191,6 @@ func main() {
 	log.Debugf("File hash: %x", filemeta.Hash)
 	log.Debugf("Filse size: %d", filesize)
 
-	blockIndexFile, err := os.Create("blockindex.json")
-	if err != nil {
-		log.Error(err)
-	}
-	defer blockIndexFile.Close()
-	jsonBlockIndex, _ := json.Marshal(blockIndex)
-	blockIndexFile.WriteString(string(jsonBlockIndex))
-	fmt.Print(string(jsonBlockIndex))
+	saveBlockIndex(config.BlockIndex, blockIndex)
 
 }
