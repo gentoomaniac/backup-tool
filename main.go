@@ -70,6 +70,7 @@ func main() {
 	log.Debug(fm.Sys())
 
 	// read file into data structs
+	// 50MB
 	var blocksize = 52428800
 	var blockIndex = make(map[string][]byte)
 
@@ -96,15 +97,18 @@ func main() {
 		data := buffer[:bytesread]
 
 		hash := sha256.Sum256(data)
+		block := &model.Block{
+			Hash:     hash[:],
+			Name:     aes256.Encrypt(hash[:], secret, iv),
+			Password: secret,
+			Size:     len(data),
+		}
 		blockIndex[hex.EncodeToString(hash[:])] = data
 
 		filehasher.Write(data)
 
 		encryptedData, _ := aes256.Encrypt(data, secret, iv)
-		blockbytes, err := local.Write(&model.Block{
-			Hash: hash[:],
-			Data: encryptedData,
-		}, "/home/marco/git-private/backup-tool/blocks")
+		blockbytes, err := local.Write(block, "/home/marco/git-private/backup-tool/blocks")
 
 		log.Debugf("bytes read: %d", bytesread)
 		log.Debugf("block hash: %x", hash)
