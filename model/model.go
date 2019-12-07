@@ -5,17 +5,12 @@ import (
 )
 
 type Backup struct {
-	Identifier string
-	Blocksize  int
-	Timestamp  int
-	Objects    []*FSObject
-}
-
-func (b *Backup) GetSize() (size int) {
-	for _, fsobj := range b.Objects {
-		size += fsobj.Size()
-	}
-	return
+	Blocksize   int
+	Timestamp   int
+	Objects     []*FSObject
+	Name        string
+	Description string
+	Expiration  int
 }
 
 type FSObject struct {
@@ -26,14 +21,7 @@ type FSObject struct {
 	Group    int64
 	Target   string
 	Hash     []byte
-	Blocks   []*BlockMeta
-}
-
-func (f *FSObject) Size() (size int) {
-	for _, block := range f.Blocks {
-		size += block.Size
-	}
-	return
+	Blocks   []string
 }
 
 type BlockMeta struct {
