@@ -14,19 +14,22 @@ type Backup struct {
 }
 
 type FSObject struct {
+	ID       int
 	Name     string
 	Path     string
-	Filetype *os.FileMode
-	User     int64
-	Group    int64
+	FileMode os.FileMode
+	User     int
+	Group    int
 	Target   string
 	Hash     []byte
-	Blocks   []string
+	Blocks   []*BlockMeta
 }
 
 type BlockMeta struct {
+	ID     int
 	Hash   []byte
 	Secret []byte
+	IV     []byte
 	Name   []byte
 	Size   int
 }

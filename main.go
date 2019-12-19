@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"os"
+	"path/filepath"
+	"syscall"
 
 	aes256 "github.com/gentoomaniac/backup-tool/lib/crypt"
 	sqlite "github.com/gentoomaniac/backup-tool/lib/db"
@@ -93,26 +95,34 @@ func main() {
 		Expiration:  999999999,
 	}
 
-	file, err := os.Open(*file)
+	f, err := os.Open(*file)
 	if err != nil {
 		log.Error(err)
 		return
 	}
-	defer file.Close()
+	defer f.Close()
 
 	filehasher := sha256.New()
-	filemeta := &model.FSObject{}
-	filesize := 0
 	var buffer = make([]byte, config.BlockSize)
-	//var blockbytes int
+
+	filestat, _ := os.Stat(*file)
+	filemeta := &model.FSObject{}
+	filemeta.Name = filepath.Base(*file)
+	filemeta.Path = filepath.Dir(*file)
+	if stat, ok := filestat.Sys().(*syscall.Stat_t); ok {
+		filemeta.User = int(stat.Uid)
+		filemeta.Group = int(stat.Gid)
+	}
+	filemeta.FileMode = filestat.Mode()
+	filesize := filestat.Size()
 
 	for {
-		bytesread, err := file.Read(buffer)
+		bytesread, err := f.Read(buffer)
 		if err != nil {
 			log.Debug(err)
 			break
 		}
-		filesize += bytesread
+		filesize += int64(bytesread)
 
 		data := buffer[:bytesread]
 
@@ -125,14 +135,16 @@ func main() {
 			Name:   []byte(base64.StdEncoding.EncodeToString(encryptedHash)),
 			Secret: blockSecret,
 			Size:   len(data),
+			IV:     iv,
 		}
 		filehasher.Write(data)
 
-		if !sqlite.IsBlockInIndex(database, blockMetadata.Hash) {
+		if sqlite.GetBlockMeta(database, blockMetadata.Hash) == nil {
 			encryptedData, _ := aes256.Encrypt(data, blockSecret, iv)
 			local.Write(encryptedData, blockMetadata, config.BlockPath)
-			sqlite.AddBlockToIndex(database, blockMetadata.Hash, blockMetadata.Name, blockMetadata.Size, blockMetadata.Secret, iv)
+			sqlite.AddBlockToIndex(database, blockMetadata)
 		}
+		filemeta.Blocks = append(filemeta.Blocks, blockMetadata)
 	}
 
 	hash := filehasher.Sum(nil)
@@ -140,7 +152,10 @@ func main() {
 	log.Debugf("File hash: %x", filemeta.Hash)
 	log.Debugf("Filse size: %d", filesize)
 
+	if sqlite.GetFSObj(database, filemeta.Hash) == nil {
+		sqlite.AddFileToIndex(database, filemeta)
+	}
+
 	backup.Objects = append(backup.Objects, filemeta)
-	//	backupIndex[uuid.New().String()] = backup
 
 }

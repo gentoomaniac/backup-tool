@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/gentoomaniac/backup-tool/model"
 	_ "github.com/mattn/go-sqlite3" // blaa
 	log "github.com/sirupsen/logrus"
 )
@@ -41,7 +42,7 @@ func InitDB(dbpath string) (*sql.DB, error) {
 			"id INTEGER PRIMARY KEY AUTOINCREMENT, "+
 			"name string, "+
 			"path TEXT, "+
-			"permissions INTEGER, "+
+			"filemode INTEGER, "+
 			"uid INTEGER, "+
 			"gid INTEGER, "+
 			"target TEXT, "+
@@ -82,30 +83,52 @@ func InitDB(dbpath string) (*sql.DB, error) {
 	return db, err
 }
 
-func AddBlockToIndex(db *sql.DB, hash []byte, name []byte, size int, secret []byte, iv []byte) {
-	_, err := db.Exec("INSERT INTO blocks (hash, name, size, secret, iv) VALUES(?, ?, ?, ?, ?)", hash, name, size, secret, iv)
+func AddBlockToIndex(db *sql.DB, block *model.BlockMeta) {
+	_, err := db.Exec("INSERT INTO blocks (hash, name, size, secret, iv) VALUES(?, ?, ?, ?, ?)", block.Hash, block.Name, block.Size, block.Secret, block.IV)
 	if err != nil {
 		log.Error(err)
 	}
-	log.Debugf("Added block to index: %x", hash)
+	log.Debugf("Added block to index: %x", block.Hash)
 }
 
-func IsBlockInIndex(db *sql.DB, hash []byte) bool {
+func GetBlockMeta(db *sql.DB, hash []byte) *model.BlockMeta {
 	rows, err := db.Query(fmt.Sprintf("SELECT * FROM blocks WHERE hash=x'%x'", hash))
 	if err != nil {
 		log.Error(err)
 	}
-	var id int
-	var rhash []byte
-	var name []byte
-	var size int
-	var secret []byte
-	var iv []byte
+	var bm model.BlockMeta
 	for rows.Next() {
-		rows.Scan(&id, &rhash, &name, &size, &secret, &iv)
+		rows.Scan(bm.ID, bm.Hash, bm.Name, bm.Size, bm.Secret, bm.IV)
 		//fmt.Printf("%d | %x | %x | %d | %x | %x\n", id, rhash, name, size, secret, iv)
 		rows.Close()
-		return true
+		return &bm
 	}
-	return false
+	return nil
+}
+
+func AddFileToIndex(db *sql.DB, file *model.FSObject) {
+	_, err := db.Exec("INSERT INTO fsobjects (name, path, filemode, uid, gid, target, hash) VALUES(?, ?, ?, ?, ?, ?, ?)",
+		file.Name, file.Path, file.FileMode, file.User, file.Group, "", file.Hash)
+	if err != nil {
+		log.Error(err)
+	}
+	log.Debugf("Added file to index: %x", file.Hash)
+}
+
+func GetFSObj(db *sql.DB, hash []byte) *model.FSObject {
+	rows, err := db.Query(fmt.Sprintf("SELECT * FROM fsobjects WHERE hash=x'%x'", hash))
+	if err != nil {
+		log.Error(err)
+	}
+
+	var obj model.FSObject
+	for rows.Next() {
+		err := rows.Scan(&obj.ID, &obj.Name, &obj.Path, &obj.FileMode, &obj.User, &obj.Group, &obj.Target, &obj.Hash)
+		if err != nil {
+			log.Error(err)
+		}
+		rows.Close()
+		return &obj
+	}
+	return nil
 }
