@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"os"
@@ -37,6 +38,15 @@ func setupConfig() {
 	if err != nil {                      // Handle errors reading the config file
 		log.Panicf("fatal error config file: %s \n", err)
 	}
+}
+
+func filterFSObjectsByHash(objects []*model.FSObject, hash []byte) *model.FSObject {
+	for _, obj := range objects {
+		if bytes.Compare(obj.Hash, hash) == 0 {
+			return obj
+		}
+	}
+	return nil
 }
 
 var (
@@ -152,7 +162,8 @@ func main() {
 	log.Debugf("File hash: %x", filemeta.Hash)
 	log.Debugf("Filse size: %d", filesize)
 
-	if sqlite.GetFSObj(database, filemeta.Hash) == nil {
+	fsObjects := sqlite.GetFSObj(database, filemeta.Name, filemeta.Path)
+	if filterFSObjectsByHash(fsObjects, filemeta.Hash) == nil {
 		sqlite.AddFileToIndex(database, filemeta)
 	}
 

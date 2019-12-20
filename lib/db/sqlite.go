@@ -115,20 +115,26 @@ func AddFileToIndex(db *sql.DB, file *model.FSObject) {
 	log.Debugf("Added file to index: %x", file.Hash)
 }
 
-func GetFSObj(db *sql.DB, hash []byte) *model.FSObject {
-	rows, err := db.Query(fmt.Sprintf("SELECT * FROM fsobjects WHERE hash=x'%x'", hash))
+func GetFSObj(db *sql.DB, name string, path string) []*model.FSObject {
+	rows, err := db.Query(fmt.Sprintf("SELECT * FROM fsobjects WHERE name='%s' AND path='%s'", name, path))
 	if err != nil {
 		log.Error(err)
+		return nil
 	}
 
-	var obj model.FSObject
+	var obj *model.FSObject
+	var objects []*model.FSObject
+	objects = make([]*model.FSObject, 0)
+
 	for rows.Next() {
+		obj = &model.FSObject{}
 		err := rows.Scan(&obj.ID, &obj.Name, &obj.Path, &obj.FileMode, &obj.User, &obj.Group, &obj.Target, &obj.Hash)
 		if err != nil {
 			log.Error(err)
+		} else {
+			objects = append(objects, obj)
 		}
-		rows.Close()
-		return &obj
 	}
-	return nil
+	rows.Close()
+	return objects
 }
