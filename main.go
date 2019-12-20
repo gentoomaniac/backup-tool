@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -49,11 +50,22 @@ func filterFSObjectsByHash(objects []*model.FSObject, hash []byte) *model.FSObje
 	return nil
 }
 
+func filePathWalkDir(root string) ([]string, error) {
+	var files []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if !info.IsDir() {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files, err
+}
+
 var (
 	verbose   = kingpin.Flag("verbose", "Verbose mode.").Short('v').Bool()
 	blocksize = kingpin.Flag("blocksize", "Data block size in bytes").Short('b').Default("52428800").Int()
 	db        = kingpin.Flag("database", "Database file with backup meta information").Short('d').Default("backup.db").String()
-	file      = kingpin.Arg("file", "File to hash").Required().ExistingFile()
+	path      = kingpin.Arg("path", "path to back up").Required().String()
 	secret    = kingpin.Flag("secret", "Base64 encoded secret").Short('s').String()
 	nonce     = kingpin.Flag("nonce", "Base64 encoded nonce").Short('n').String()
 )
@@ -95,7 +107,6 @@ func main() {
 	}).Debug("secret loaded")
 
 	// Backup code
-
 	backup := &model.Backup{
 		Blocksize:   config.BlockSize,
 		Timestamp:   0,
@@ -105,68 +116,80 @@ func main() {
 		Expiration:  999999999,
 	}
 
-	f, err := os.Open(*file)
-	if err != nil {
-		log.Error(err)
-		return
-	}
-	defer f.Close()
+	pathstat, _ := os.Stat(*path)
 
-	filehasher := sha256.New()
+	var files []string
+	if pathstat.IsDir() {
+		files, _ = filePathWalkDir(*path)
+	} else {
+		files = make([]string, 0)
+		files = append(files, *path)
+	}
+
 	var buffer = make([]byte, config.BlockSize)
+	filehasher := sha256.New()
 
-	filestat, _ := os.Stat(*file)
-	filemeta := &model.FSObject{}
-	filemeta.Name = filepath.Base(*file)
-	filemeta.Path = filepath.Dir(*file)
-	if stat, ok := filestat.Sys().(*syscall.Stat_t); ok {
-		filemeta.User = int(stat.Uid)
-		filemeta.Group = int(stat.Gid)
-	}
-	filemeta.FileMode = filestat.Mode()
-	filesize := filestat.Size()
+	for _, file := range files {
+		fmt.Printf("Backing up file %s", file)
 
-	for {
-		bytesread, err := f.Read(buffer)
+		f, err := os.Open(file)
 		if err != nil {
-			log.Debug(err)
-			break
+			log.Error(err)
+			return
 		}
-		filesize += int64(bytesread)
+		defer f.Close()
 
-		data := buffer[:bytesread]
-
-		blockSecret, _ := aes256.GenerateSecret()
-		hash := sha256.Sum256(data)
-		encryptedHash, _ := aes256.Encrypt(hash[:], blockSecret, iv)
-		aes256.Encrypt(hash[:], blockSecret, iv)
-		blockMetadata := &model.BlockMeta{
-			Hash:   hash[:],
-			Name:   []byte(base64.StdEncoding.EncodeToString(encryptedHash)),
-			Secret: blockSecret,
-			Size:   len(data),
-			IV:     iv,
+		filemeta := &model.FSObject{}
+		filestat, _ := os.Stat(file)
+		filemeta.Name = filepath.Base(file)
+		filemeta.Path, _ = filepath.Abs(filepath.Dir(file))
+		if stat, ok := filestat.Sys().(*syscall.Stat_t); ok {
+			filemeta.User = int(stat.Uid)
+			filemeta.Group = int(stat.Gid)
 		}
-		filehasher.Write(data)
+		filemeta.FileMode = filestat.Mode()
+		filesize := filestat.Size()
 
-		if sqlite.GetBlockMeta(database, blockMetadata.Hash) == nil {
-			encryptedData, _ := aes256.Encrypt(data, blockSecret, iv)
-			local.Write(encryptedData, blockMetadata, config.BlockPath)
-			sqlite.AddBlockToIndex(database, blockMetadata)
+		for {
+			bytesread, err := f.Read(buffer)
+			if err != nil {
+				log.Debug(err)
+				break
+			}
+			filesize += int64(bytesread)
+
+			data := buffer[:bytesread]
+
+			blockSecret, _ := aes256.GenerateSecret()
+			hash := sha256.Sum256(data)
+			encryptedHash, _ := aes256.Encrypt(hash[:], blockSecret, iv)
+			aes256.Encrypt(hash[:], blockSecret, iv)
+			blockMetadata := &model.BlockMeta{
+				Hash:   hash[:],
+				Name:   []byte(base64.StdEncoding.EncodeToString(encryptedHash)),
+				Secret: blockSecret,
+				Size:   len(data),
+				IV:     iv,
+			}
+			filehasher.Write(data)
+
+			if sqlite.GetBlockMeta(database, blockMetadata.Hash) == nil {
+				encryptedData, _ := aes256.Encrypt(data, blockSecret, iv)
+				local.Write(encryptedData, blockMetadata, config.BlockPath)
+				sqlite.AddBlockToIndex(database, blockMetadata)
+			}
+			filemeta.Blocks = append(filemeta.Blocks, blockMetadata)
 		}
-		filemeta.Blocks = append(filemeta.Blocks, blockMetadata)
+
+		hash := filehasher.Sum(nil)
+		filemeta.Hash = hash[:]
+		log.Debugf("File hash: %x", filemeta.Hash)
+		log.Debugf("Filse size: %d", filesize)
+
+		fsObjects := sqlite.GetFSObj(database, filemeta.Name, filemeta.Path)
+		if filterFSObjectsByHash(fsObjects, filemeta.Hash) == nil {
+			sqlite.AddFileToIndex(database, filemeta)
+		}
+		backup.Objects = append(backup.Objects, filemeta)
 	}
-
-	hash := filehasher.Sum(nil)
-	filemeta.Hash = hash[:]
-	log.Debugf("File hash: %x", filemeta.Hash)
-	log.Debugf("Filse size: %d", filesize)
-
-	fsObjects := sqlite.GetFSObj(database, filemeta.Name, filemeta.Path)
-	if filterFSObjectsByHash(fsObjects, filemeta.Hash) == nil {
-		sqlite.AddFileToIndex(database, filemeta)
-	}
-
-	backup.Objects = append(backup.Objects, filemeta)
-
 }
