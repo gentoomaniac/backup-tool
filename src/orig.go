@@ -14,9 +14,9 @@ import (
 	local "github.com/gentoomaniac/backup-tool/lib/output"
 	"github.com/gentoomaniac/backup-tool/model"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/alecthomas/kingpin"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -61,34 +61,38 @@ func filePathWalkDir(root string) ([]string, error) {
 	return files, err
 }
 
-var (
-	verbose   = kingpin.Flag("verbose", "Verbose mode.").Short('v').Bool()
-	blocksize = kingpin.Flag("blocksize", "Data block size in bytes").Short('b').Default("52428800").Int()
-	db        = kingpin.Flag("database", "Database file with backup meta information").Short('d').Default("backup.db").String()
-	path      = kingpin.Arg("path", "path to back up").Required().String()
-	secret    = kingpin.Flag("secret", "Base64 encoded secret").Short('s').String()
-	nonce     = kingpin.Flag("nonce", "Base64 encoded nonce").Short('n').String()
-)
-
 func main() {
-	kingpin.Version("0.0.1")
-	kingpin.Parse()
+	var verbose = false
+	var blocksize int = 0
+	var db = ""
+	var path = ""
+	var secret = ""
+	var nonce = ""
+
+	var rootCmd = &cobra.Command{Use: "app"}
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	rootCmd.PersistentFlags().IntVarP(&blocksize, "blocksize", "b", 52428800, "Data block size in bytes")
+	rootCmd.PersistentFlags().StringVarP(&db, "db", "d", "backup.db", "Database file with backup meta information")
+	rootCmd.PersistentFlags().StringVarP(&path, "path", "p", "", "path to backup")
+	rootCmd.PersistentFlags().StringVarP(&secret, "secret", "s", "", "secret")
+	rootCmd.PersistentFlags().StringVarP(&nonce, "nonce", "n", "", "IV")
+	rootCmd.Execute()
 
 	config := &config{
-		DBPath:    *db,
+		DBPath:    db,
 		BlockPath: "/home/marco/git-private/backup-tool/blocks",
-		BlockSize: *blocksize,
+		BlockSize: blocksize,
 	}
 
-	database, _ := sqlite.InitDB(*db)
+	database, _ := sqlite.InitDB(db)
 	log.Debug("DB initialised")
 
 	// encryption / decryption
 	var iv []byte
-	if *nonce == "" {
+	if nonce == "" {
 		iv, _ = aes256.GenerateIV()
 	} else {
-		decodedNonce, _ := base64.StdEncoding.DecodeString(*nonce)
+		decodedNonce, _ := base64.StdEncoding.DecodeString(nonce)
 		iv = []byte(decodedNonce)
 	}
 	log.WithFields(log.Fields{
@@ -96,10 +100,10 @@ func main() {
 	}).Debug("iv loaded")
 
 	var secretBytes []byte
-	if *secret == "" {
+	if secret == "" {
 		secretBytes, _ = aes256.GenerateSecret()
 	} else {
-		decodedSecret, _ := base64.StdEncoding.DecodeString(*secret)
+		decodedSecret, _ := base64.StdEncoding.DecodeString(secret)
 		secretBytes = []byte(decodedSecret)
 	}
 	log.WithFields(log.Fields{
@@ -116,14 +120,14 @@ func main() {
 		Expiration:  999999999,
 	}
 
-	pathstat, _ := os.Stat(*path)
+	pathStat, _ := os.Stat(path)
 
 	var files []string
-	if pathstat.IsDir() {
-		files, _ = filePathWalkDir(*path)
+	if pathStat.IsDir() {
+		files, _ = filePathWalkDir(path)
 	} else {
 		files = make([]string, 0)
-		files = append(files, *path)
+		files = append(files, path)
 	}
 
 	var buffer = make([]byte, config.BlockSize)
