@@ -6,7 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/gentoomaniac/backup-tool/model"
+	"github.com/gentoomaniac/backup-tool/lib/model"
+
 	log "github.com/sirupsen/logrus"
 )
 

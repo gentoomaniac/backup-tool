@@ -11,8 +11,8 @@ import (
 
 	aes256 "github.com/gentoomaniac/backup-tool/lib/crypt"
 	sqlite "github.com/gentoomaniac/backup-tool/lib/db"
+	"github.com/gentoomaniac/backup-tool/lib/model"
 	local "github.com/gentoomaniac/backup-tool/lib/output"
-	"github.com/gentoomaniac/backup-tool/model"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
@@ -11,24 +12,49 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	aes256 "github.com/gentoomaniac/backup-tool/lib/crypt"
-	sqlite "github.com/gentoomaniac/backup-tool/lib/db"
+
+	"github.com/gentoomaniac/backup-tool/lib/model"
+
 	local "github.com/gentoomaniac/backup-tool/lib/output"
-	"github.com/gentoomaniac/backup-tool/model"
+
+	sqlite "github.com/gentoomaniac/backup-tool/lib/db"
+
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
+
+func filterFSObjectsByHash(objects []*model.FSObject, hash []byte) *model.FSObject {
+	for _, obj := range objects {
+		if bytes.Compare(obj.Hash, hash) == 0 {
+			return obj
+		}
+	}
+	return nil
+}
+
+func filePathWalkDir(root string) ([]string, error) {
+	var files []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if !info.IsDir() {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files, err
+}
 
 // backupCmd represents the backup command
 var backupCmd = &cobra.Command{
 	Use:   "backup",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short: "create a backup",
+	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
+		blocksize, _ := cmd.Flags().GetInt("blocksize")
+		db, _ := cmd.Flags().GetString("db")
+		blockpath, _ := cmd.Flags().GetString("path")
+		secret, _ := cmd.Flags().GetString("secret")
+		nonce, _ := cmd.Flags().GetString("nonce")
 
 		database, _ := sqlite.InitDB(db)
 		log.Debug("DB initialised")
@@ -58,7 +84,7 @@ to quickly create a Cobra application.`,
 
 		// Backup code
 		backup := &model.Backup{
-			Blocksize:   config.BlockSize,
+			Blocksize:   blocksize,
 			Timestamp:   0,
 			Objects:     make([]*model.FSObject, 0),
 			Name:        "test backup",
@@ -66,17 +92,17 @@ to quickly create a Cobra application.`,
 			Expiration:  999999999,
 		}
 
-		pathStat, _ := os.Stat(path)
+		pathStat, _ := os.Stat(blockpath)
 
 		var files []string
 		if pathStat.IsDir() {
-			files, _ = filePathWalkDir(path)
+			files, _ = filePathWalkDir(blockpath)
 		} else {
 			files = make([]string, 0)
-			files = append(files, path)
+			files = append(files, blockpath)
 		}
 
-		var buffer = make([]byte, config.BlockSize)
+		var buffer = make([]byte, blocksize)
 		filehasher := sha256.New()
 
 		for _, file := range files {
@@ -125,7 +151,7 @@ to quickly create a Cobra application.`,
 
 				if sqlite.GetBlockMeta(database, blockMetadata.Hash) == nil {
 					encryptedData, _ := aes256.Encrypt(data, blockSecret, iv)
-					local.Write(encryptedData, blockMetadata, config.BlockPath)
+					local.Write(encryptedData, blockMetadata, blockpath)
 					sqlite.AddBlockToIndex(database, blockMetadata)
 				}
 				filemeta.Blocks = append(filemeta.Blocks, blockMetadata)
@@ -147,19 +173,16 @@ to quickly create a Cobra application.`,
 
 func init() {
 	rootCmd.AddCommand(backupCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// backupCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// backupCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 	backupCmd.Flags().IntP("blocksize", "b", 52428800, "Data block size in bytes")
 	backupCmd.Flags().StringP("db", "d", "backup.db", "Database file with backup meta information")
 	backupCmd.Flags().StringP("path", "p", "", "path to backup")
 	backupCmd.Flags().StringP("secret", "s", "", "secret")
 	backupCmd.Flags().StringP("nonce", "n", "", "IV")
+	viper.BindPFlag("blocksize", backupCmd.Flags().Lookup("blocksize"))
+	viper.BindPFlag("db", backupCmd.Flags().Lookup("db"))
+	viper.BindPFlag("path", backupCmd.Flags().Lookup("path"))
+	viper.BindPFlag("secret", backupCmd.Flags().Lookup("secret"))
+	viper.BindPFlag("nonce", backupCmd.Flags().Lookup("nonce"))
+
+	backupCmd.MarkFlagRequired("path")
 }

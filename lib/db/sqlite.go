@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/gentoomaniac/backup-tool/model"
+	"github.com/gentoomaniac/backup-tool/lib/model"
 	_ "github.com/mattn/go-sqlite3" // blaa
 	log "github.com/sirupsen/logrus"
 )
