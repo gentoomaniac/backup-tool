@@ -25,10 +25,12 @@ func Write(data []byte, metadata *model.BlockMeta, basepath string) (int, error)
 	blockfile, err := os.Create(filepath.Join(blockpath, hex.EncodeToString(metadata.Name)))
 	if err != nil {
 		log.Error(err)
+		blockfile.Close()
 		return 0, err
 	}
-	defer blockfile.Close()
 
 	bytes, err := blockfile.Write(data)
+
+	blockfile.Close()
 	return bytes, err
 }

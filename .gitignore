@@ -1,4 +1,7 @@
+blocks/
 *.so
 helloworld
 blockindex
 test_cmd
+backup.db
+.env

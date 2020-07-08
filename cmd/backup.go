@@ -52,9 +52,12 @@ var backupCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		blocksize, _ := cmd.Flags().GetInt("blocksize")
 		db, _ := cmd.Flags().GetString("db")
-		blockpath, _ := cmd.Flags().GetString("path")
+		blockpath, _ := cmd.Flags().GetString("blockpath")
+		path, _ := cmd.Flags().GetString("path")
 		secret, _ := cmd.Flags().GetString("secret")
 		nonce, _ := cmd.Flags().GetString("nonce")
+		backupname, _ := cmd.Flags().GetString("name")
+		backupdescription, _ := cmd.Flags().GetString("description")
 
 		database, _ := sqlite.InitDB(db)
 		log.Debug("DB initialised")
@@ -87,19 +90,19 @@ var backupCmd = &cobra.Command{
 			Blocksize:   blocksize,
 			Timestamp:   0,
 			Objects:     make([]*model.FSObject, 0),
-			Name:        "test backup",
-			Description: "Just a test entry",
+			Name:        backupname,
+			Description: backupdescription,
 			Expiration:  999999999,
 		}
 
-		pathStat, _ := os.Stat(blockpath)
+		pathStat, _ := os.Stat(path)
 
 		var files []string
 		if pathStat.IsDir() {
-			files, _ = filePathWalkDir(blockpath)
+			files, _ = filePathWalkDir(path)
 		} else {
 			files = make([]string, 0)
-			files = append(files, blockpath)
+			files = append(files, path)
 		}
 
 		var buffer = make([]byte, blocksize)
@@ -129,7 +132,6 @@ var backupCmd = &cobra.Command{
 			for {
 				bytesread, err := f.Read(buffer)
 				if err != nil {
-					log.Debug(err)
 					break
 				}
 				filesize += int64(bytesread)
@@ -167,15 +169,22 @@ var backupCmd = &cobra.Command{
 				sqlite.AddFileToIndex(database, filemeta)
 			}
 			backup.Objects = append(backup.Objects, filemeta)
+
+			f.Close()
 		}
+
+		sqlite.AddBackupToIndex(database, backup)
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(backupCmd)
 	backupCmd.Flags().IntP("blocksize", "b", 52428800, "Data block size in bytes")
+	backupCmd.Flags().StringP("name", "", "", "name of the backup")
+	backupCmd.Flags().StringP("description", "", "", "description for the backup")
 	backupCmd.Flags().StringP("db", "d", "backup.db", "Database file with backup meta information")
 	backupCmd.Flags().StringP("path", "p", "", "path to backup")
+	backupCmd.Flags().StringP("blockpath", "o", "", "path to store the blocks at")
 	backupCmd.Flags().StringP("secret", "s", "", "secret")
 	backupCmd.Flags().StringP("nonce", "n", "", "IV")
 	viper.BindPFlag("blocksize", backupCmd.Flags().Lookup("blocksize"))
@@ -185,4 +194,5 @@ func init() {
 	viper.BindPFlag("nonce", backupCmd.Flags().Lookup("nonce"))
 
 	backupCmd.MarkFlagRequired("path")
+	backupCmd.MarkFlagRequired("name")
 }

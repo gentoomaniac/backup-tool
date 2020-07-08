@@ -138,3 +138,12 @@ func GetFSObj(db *sql.DB, name string, path string) []*model.FSObject {
 	rows.Close()
 	return objects
 }
+
+func AddBackupToIndex(db *sql.DB, backup *model.Backup) {
+	_, err := db.Exec("INSERT INTO backups (name, description, blocksize, created, expires) VALUES(?, ?, ?, ?, ?)",
+		backup.Name, backup.Description, backup.Blocksize, backup.Timestamp, backup.Expiration)
+	if err != nil {
+		log.Error(err)
+	}
+	log.Debugf("Added backup to index: '%s'", backup.Name)
+}
