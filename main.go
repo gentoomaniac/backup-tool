@@ -1,22 +1,80 @@
-/*
-Copyright © 2020 Marco Siebecke
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
 package main
 
-import "github.com/gentoomaniac/backup-tool/cmd"
+import (
+	"io/ioutil"
+	"log"
+	"os"
+	"regexp"
+
+	"github.com/alecthomas/kong"
+	"github.com/rs/zerolog"
+	zlog "github.com/rs/zerolog/log"
+)
+
+var (
+	version    = "0.0.1-dev"
+	githubSlug = "ahilsend/tink-infrastructure"
+)
+
+var cli struct {
+	Verbose int   `short:"v" help:"Increase verbosity." type:"counter"`
+	Quiet   bool  `short:"q" help:"Do not run upgrades."`
+	Json    bool  `help:"Log as json"`
+	Regex   regex `help:"Some parameter with custom validator" default:".*"`
+
+	Backup struct {
+		BlockSize   int    `short:"b" help:"Data block size in bytes" default:"52428800"`
+		BlockPath   string `short:"p" help:"Where to store the blocks" default:"./blocks/"`
+		Name        string `required help:"name of the backup"`
+		Description string `help:"description for the backup"`
+		DBPath      string `short:"d" help:"database file with backup meta information" type:"path"`
+		Secret      string `short:"s" help:"secret"`
+		Nonce       string `short:"n" help:"IV"`
+		Path        string `argument required help:"path to backup"`
+	} `cmd help:"Run a backup"`
+	Run struct {
+	} `cmd help:"Run the application (default)." default:"1" hidden`
+
+	Version kong.VersionFlag `short:"v" help:"Display version."`
+}
+
+type regex string
+
+func (r *regex) String() string {
+	return string(*r)
+}
+func (r *regex) Validate() (err error) {
+	_, err = regexp.Compile(r.String())
+	return err
+}
+
+func setupLogging(verbosity int, logJson bool, quiet bool) {
+	if !quiet {
+		// 1 is zerolog.InfoLevel
+		zerolog.SetGlobalLevel(zerolog.Level(1 - verbosity))
+		if !logJson {
+			zlog.Logger = zlog.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+		}
+	} else {
+		zerolog.SetGlobalLevel(zerolog.Disabled)
+		log.SetFlags(0)
+		log.SetOutput(ioutil.Discard)
+	}
+}
 
 func main() {
-	cmd.Execute()
+	ctx := kong.Parse(&cli, kong.UsageOnError(), kong.Vars{
+		"version": version,
+	})
+	setupLogging(cli.Verbose, cli.Json, cli.Quiet)
+
+	switch ctx.Command() {
+	case "backup":
+		backup()
+
+	default:
+		zlog.Info().Msg("Default command")
+		zlog.Debug().Str("regex", cli.Regex.String()).Msg("debug message with extra values")
+	}
+	ctx.Exit(0)
 }
