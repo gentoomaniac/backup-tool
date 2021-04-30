@@ -4,7 +4,6 @@ import (
 	"io/ioutil"
 	golog "log"
 	"os"
-	"regexp"
 
 	"github.com/alecthomas/kong"
 	"github.com/rs/zerolog"
@@ -17,10 +16,9 @@ var (
 )
 
 var cli struct {
-	Verbose int   `short:"v" help:"Increase verbosity." type:"counter"`
-	Quiet   bool  `short:"q" help:"Do not run upgrades."`
-	Json    bool  `help:"Log as json"`
-	Regex   regex `help:"Some parameter with custom validator" default:".*"`
+	Verbose int  `short:"v" help:"Increase verbosity." type:"counter"`
+	Quiet   bool `short:"q" help:"Do not run upgrades."`
+	Json    bool `help:"Log as json"`
 
 	Backup struct {
 		BlockSize   int    `short:"b" help:"Data block size in bytes" default:"52428800"`
@@ -36,16 +34,6 @@ var cli struct {
 	} `cmd help:"Run the application (default)." default:"1" hidden`
 
 	Version kong.VersionFlag `short:"v" help:"Display version."`
-}
-
-type regex string
-
-func (r *regex) String() string {
-	return string(*r)
-}
-func (r *regex) Validate() (err error) {
-	_, err = regexp.Compile(r.String())
-	return err
 }
 
 func setupLogging(verbosity int, logJson bool, quiet bool) {
