@@ -2,13 +2,13 @@ package main
 
 import (
 	"io/ioutil"
-	"log"
+	golog "log"
 	"os"
 	"regexp"
 
 	"github.com/alecthomas/kong"
 	"github.com/rs/zerolog"
-	zlog "github.com/rs/zerolog/log"
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -53,12 +53,12 @@ func setupLogging(verbosity int, logJson bool, quiet bool) {
 		// 1 is zerolog.InfoLevel
 		zerolog.SetGlobalLevel(zerolog.Level(1 - verbosity))
 		if !logJson {
-			zlog.Logger = zlog.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+			log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 		}
 	} else {
 		zerolog.SetGlobalLevel(zerolog.Disabled)
-		log.SetFlags(0)
-		log.SetOutput(ioutil.Discard)
+		golog.SetFlags(0)
+		golog.SetOutput(ioutil.Discard)
 	}
 }
 
@@ -73,8 +73,8 @@ func main() {
 		backup()
 
 	default:
-		zlog.Info().Msg("Default command")
-		zlog.Debug().Str("regex", cli.Regex.String()).Msg("debug message with extra values")
+		log.Info().Msg("Default command")
+		log.Debug().Str("regex", cli.Regex.String()).Msg("debug message with extra values")
 	}
 	ctx.Exit(0)
 }
