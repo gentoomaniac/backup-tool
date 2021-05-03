@@ -15,7 +15,7 @@ var (
 )
 
 var cli struct {
-	Logging logging.Config
+	logging.LoggingConfig
 
 	Backup struct {
 		BlockSize   int    `short:"b" help:"Data block size in bytes" default:"52428800"`
@@ -41,11 +41,11 @@ func main() {
 		"builtBy": builtBy,
 		"date":    date,
 	})
-	logging.Setup(&cli.Logging)
+	logging.Setup(&cli.LoggingConfig)
 
 	switch ctx.Command() {
 	case "backup":
-		Backup()
+		backup()
 
 	default:
 		log.Info().Msg("Default command")

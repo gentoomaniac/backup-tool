@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -37,7 +38,7 @@ func filePathWalkDir(root string) ([]string, error) {
 	return files, err
 }
 
-func Backup() {
+func backup() {
 	database, err := sqlite.InitDB(cli.Backup.DBPath)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed initialising DB")
@@ -144,7 +145,7 @@ func Backup() {
 
 		hash := filehasher.Sum(nil)
 		filemeta.Hash = hash[:]
-		log.Debug().Str("hash", string(filemeta.Hash)).Int("size", int(filesize)).Msg("")
+		log.Debug().Str("hash", fmt.Sprintf("%x", filemeta.Hash)).Int("size", int(filesize)).Msg("")
 
 		fsObjects, err := sqlite.GetFSObj(database, filemeta.Name, filemeta.Path)
 		if err != nil {

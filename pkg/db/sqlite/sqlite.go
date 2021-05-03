@@ -7,7 +7,6 @@ import (
 
 	model "github.com/gentoomaniac/backup-tool/pkg/model"
 	_ "github.com/mattn/go-sqlite3" // blaa
-	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
 
@@ -108,7 +107,7 @@ func GetBlockMeta(db *sql.DB, hash []byte) (*model.BlockMeta, error) {
 		rows.Close()
 		return &bm, nil
 	}
-	return nil, errors.New("No metadata found")
+	return nil, nil
 }
 
 func AddFileToIndex(db *sql.DB, file *model.FSObject) error {
