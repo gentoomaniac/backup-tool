@@ -1,68 +1,54 @@
 package main
 
 import (
-	"io/ioutil"
-	golog "log"
-	"os"
-
 	"github.com/alecthomas/kong"
-	"github.com/rs/zerolog"
+	"github.com/gentoomaniac/logging"
 	"github.com/rs/zerolog/log"
 )
 
 var (
-	version    = "0.0.1-dev"
-	githubSlug = "ahilsend/tink-infrastructure"
+	version = "unset"
+	commit  = "unset"
+	binName = "backup-tool"
+	builtBy = "manual"
+	date    = "unset"
 )
 
 var cli struct {
-	Verbose int  `short:"v" help:"Increase verbosity." type:"counter"`
-	Quiet   bool `short:"q" help:"Do not run upgrades."`
-	Json    bool `help:"Log as json"`
+	Logging logging.Config
 
 	Backup struct {
 		BlockSize   int    `short:"b" help:"Data block size in bytes" default:"52428800"`
 		BlockPath   string `short:"p" help:"Where to store the blocks" default:"./blocks/"`
-		Name        string `required help:"name of the backup"`
+		Name        string `help:"name of the backup" required:""`
 		Description string `help:"description for the backup"`
 		DBPath      string `short:"d" help:"database file with backup meta information" type:"path"`
 		Secret      string `short:"s" help:"secret"`
 		Nonce       string `short:"n" help:"IV"`
-		Path        string `argument required help:"path to backup"`
-	} `cmd help:"Run a backup"`
+		Path        string `help:"path to backup" argument:"" required:""`
+	} `cmd:"" help:"Run a backup"`
 	Run struct {
-	} `cmd help:"Run the application (default)." default:"1" hidden`
+	} `cmd:"" help:"Run the application (default)." default:"1" hidden:""`
 
 	Version kong.VersionFlag `short:"v" help:"Display version."`
-}
-
-func setupLogging(verbosity int, logJson bool, quiet bool) {
-	if !quiet {
-		// 1 is zerolog.InfoLevel
-		zerolog.SetGlobalLevel(zerolog.Level(1 - verbosity))
-		if !logJson {
-			log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-		}
-	} else {
-		zerolog.SetGlobalLevel(zerolog.Disabled)
-		golog.SetFlags(0)
-		golog.SetOutput(ioutil.Discard)
-	}
 }
 
 func main() {
 	ctx := kong.Parse(&cli, kong.UsageOnError(), kong.Vars{
 		"version": version,
+		"commit":  commit,
+		"binName": binName,
+		"builtBy": builtBy,
+		"date":    date,
 	})
-	setupLogging(cli.Verbose, cli.Json, cli.Quiet)
+	logging.Setup(&cli.Logging)
 
 	switch ctx.Command() {
 	case "backup":
-		backup()
+		Backup()
 
 	default:
 		log.Info().Msg("Default command")
-		log.Debug().Str("regex", cli.Regex.String()).Msg("debug message with extra values")
 	}
 	ctx.Exit(0)
 }

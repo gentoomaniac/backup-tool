@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
-	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -20,7 +19,7 @@ import (
 
 func filterFSObjectsByHash(objects []*model.FSObject, hash []byte) *model.FSObject {
 	for _, obj := range objects {
-		if bytes.Compare(obj.Hash, hash) == 0 {
+		if bytes.Equal(obj.Hash, hash) {
 			return obj
 		}
 	}
@@ -38,12 +37,12 @@ func filePathWalkDir(root string) ([]string, error) {
 	return files, err
 }
 
-func backup() {
+func Backup() {
 	database, err := sqlite.InitDB(cli.Backup.DBPath)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed initialising DB")
 	}
-	log.Debug("DB initialised")
+	log.Debug().Msg("DB initialised")
 
 	// encryption / decryption
 	var iv []byte
@@ -62,9 +61,7 @@ func backup() {
 		decodedSecret, _ := base64.StdEncoding.DecodeString(cli.Backup.Secret)
 		secretBytes = []byte(decodedSecret)
 	}
-	log.WithFields(log.Fields{
-		"secret": base64.StdEncoding.EncodeToString(secretBytes),
-	}).Debug("secret loaded")
+	log.Debug().Str("secret", base64.StdEncoding.EncodeToString(secretBytes)).Msg("secret loaded")
 
 	// Backup code
 	backup := &model.Backup{
@@ -90,7 +87,7 @@ func backup() {
 	filehasher := sha256.New()
 
 	for _, file := range files {
-		fmt.Info().Msgf("Backing up file %s", file)
+		log.Info().Msgf("Backing up file %s", file)
 
 		f, err := os.Open(file)
 		if err != nil {
@@ -132,7 +129,12 @@ func backup() {
 			}
 			filehasher.Write(data)
 
-			if sqlite.GetBlockMeta(database, blockMetadata.Hash) == nil {
+			meta, err := sqlite.GetBlockMeta(database, blockMetadata.Hash)
+			if err != nil {
+				log.Error().Err(err).Msg("")
+				return
+			}
+			if meta == nil {
 				encryptedData, _ := aes256.Encrypt(data, blockSecret, iv)
 				local.Write(encryptedData, blockMetadata, cli.Backup.BlockPath)
 				sqlite.AddBlockToIndex(database, blockMetadata)
@@ -142,9 +144,12 @@ func backup() {
 
 		hash := filehasher.Sum(nil)
 		filemeta.Hash = hash[:]
-		log.Debug().Str("hash", filemeta.Hash).Int("size", filesize).Msg("")
+		log.Debug().Str("hash", string(filemeta.Hash)).Int("size", int(filesize)).Msg("")
 
-		fsObjects := sqlite.GetFSObj(database, filemeta.Name, filemeta.Path)
+		fsObjects, err := sqlite.GetFSObj(database, filemeta.Name, filemeta.Path)
+		if err != nil {
+			log.Error().Err(err).Msg("")
+		}
 		if filterFSObjectsByHash(fsObjects, filemeta.Hash) == nil {
 			sqlite.AddFileToIndex(database, filemeta)
 		}
