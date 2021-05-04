@@ -10,15 +10,25 @@ import (
 	"syscall"
 
 	"github.com/gentoomaniac/backup-tool/pkg/crypt/aes256"
-	"github.com/gentoomaniac/backup-tool/pkg/db/sqlite"
-	"github.com/gentoomaniac/backup-tool/pkg/model"
+	"github.com/gentoomaniac/backup-tool/pkg/db"
 	"github.com/gentoomaniac/backup-tool/pkg/output/local"
 	"github.com/rs/zerolog/log"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func filterFSObjectsByHash(objects []*model.FSObject, hash []byte) *model.FSObject {
+type Backup struct {
+	BlockSize   int    `short:"b" help:"Data block size in bytes" default:"52428800"`
+	BlockPath   string `short:"p" help:"Where to store the blocks" default:"./blocks/"`
+	Name        string `help:"name of the backup" required:""`
+	Description string `help:"description for the backup"`
+	Secret      string `short:"s" help:"secret"`
+	Nonce       string `short:"n" help:"IV"`
+	Path        string `help:"path to backup" argument:"" required:""`
+	DBPath      string `short:"d" help:"database file with backup meta information" type:"path"`
+}
+
+func filterFSObjectsByHash(objects []*db.FSObject, hash []byte) *db.FSObject {
 	for _, obj := range objects {
 		if bytes.Equal(obj.Hash, hash) {
 			return obj
@@ -38,53 +48,47 @@ func filePathWalkDir(root string) ([]string, error) {
 	return files, err
 }
 
-func backup() {
-	database, err := sqlite.InitDB(cli.Backup.DBPath)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed initialising DB")
-	}
-	log.Debug().Msg("DB initialised")
-
+func backup(database db.DB, params *Backup) {
 	// encryption / decryption
 	var iv []byte
-	if cli.Backup.Nonce == "" {
+	if params.Nonce == "" {
 		iv, _ = aes256.GenerateIV()
 	} else {
-		decodedNonce, _ := base64.StdEncoding.DecodeString(cli.Backup.Name)
+		decodedNonce, _ := base64.StdEncoding.DecodeString(params.Name)
 		iv = []byte(decodedNonce)
 	}
 	log.Debug().Str("iv", base64.StdEncoding.EncodeToString(iv)).Msg("iv loaded")
 
 	var secretBytes []byte
-	if cli.Backup.Secret == "" {
+	if params.Secret == "" {
 		secretBytes, _ = aes256.GenerateSecret()
 	} else {
-		decodedSecret, _ := base64.StdEncoding.DecodeString(cli.Backup.Secret)
+		decodedSecret, _ := base64.StdEncoding.DecodeString(params.Secret)
 		secretBytes = []byte(decodedSecret)
 	}
 	log.Debug().Str("secret", base64.StdEncoding.EncodeToString(secretBytes)).Msg("secret loaded")
 
 	// Backup code
-	backup := &model.Backup{
-		Blocksize:   cli.Backup.BlockSize,
+	backup := &db.Backup{
+		Blocksize:   params.BlockSize,
 		Timestamp:   0,
-		Objects:     make([]*model.FSObject, 0),
-		Name:        cli.Backup.Name,
-		Description: cli.Backup.Description,
+		Objects:     make([]*db.FSObject, 0),
+		Name:        params.Name,
+		Description: params.Description,
 		Expiration:  999999999,
 	}
 
-	pathStat, _ := os.Stat(cli.Backup.Path)
+	pathStat, _ := os.Stat(params.Path)
 
 	var files []string
 	if pathStat.IsDir() {
-		files, _ = filePathWalkDir(cli.Backup.Path)
+		files, _ = filePathWalkDir(params.Path)
 	} else {
 		files = make([]string, 0)
-		files = append(files, cli.Backup.Path)
+		files = append(files, params.Path)
 	}
 
-	var buffer = make([]byte, cli.Backup.BlockSize)
+	var buffer = make([]byte, params.BlockSize)
 	filehasher := sha256.New()
 
 	for _, file := range files {
@@ -97,7 +101,7 @@ func backup() {
 		}
 		defer f.Close()
 
-		filemeta := &model.FSObject{}
+		filemeta := &db.FSObject{}
 		filestat, _ := os.Stat(file)
 		filemeta.Name = filepath.Base(file)
 		filemeta.Path, _ = filepath.Abs(filepath.Dir(file))
@@ -121,7 +125,7 @@ func backup() {
 			hash := sha256.Sum256(data)
 			encryptedHash, _ := aes256.Encrypt(hash[:], blockSecret, iv)
 			aes256.Encrypt(hash[:], blockSecret, iv)
-			blockMetadata := &model.BlockMeta{
+			blockMetadata := &db.BlockMeta{
 				Hash:   hash[:],
 				Name:   []byte(base64.StdEncoding.EncodeToString(encryptedHash)),
 				Secret: blockSecret,
@@ -130,15 +134,15 @@ func backup() {
 			}
 			filehasher.Write(data)
 
-			meta, err := sqlite.GetBlockMeta(database, blockMetadata.Hash)
+			meta, err := database.GetBlockMeta(blockMetadata.Hash)
 			if err != nil {
 				log.Error().Err(err).Msg("")
 				return
 			}
 			if meta == nil {
 				encryptedData, _ := aes256.Encrypt(data, blockSecret, iv)
-				local.Write(encryptedData, blockMetadata, cli.Backup.BlockPath)
-				sqlite.AddBlockToIndex(database, blockMetadata)
+				local.Write(encryptedData, blockMetadata, params.BlockPath)
+				database.AddBlockToIndex(blockMetadata)
 			}
 			filemeta.Blocks = append(filemeta.Blocks, blockMetadata)
 		}
@@ -147,17 +151,17 @@ func backup() {
 		filemeta.Hash = hash[:]
 		log.Debug().Str("hash", fmt.Sprintf("%x", filemeta.Hash)).Int("size", int(filesize)).Msg("")
 
-		fsObjects, err := sqlite.GetFSObj(database, filemeta.Name, filemeta.Path)
+		fsObjects, err := database.GetFSObj(filemeta.Name, filemeta.Path)
 		if err != nil {
 			log.Error().Err(err).Msg("")
 		}
 		if filterFSObjectsByHash(fsObjects, filemeta.Hash) == nil {
-			sqlite.AddFileToIndex(database, filemeta)
+			database.AddFileToIndex(filemeta)
 		}
 		backup.Objects = append(backup.Objects, filemeta)
 
 		f.Close()
 	}
 
-	sqlite.AddBackupToIndex(database, backup)
+	database.AddBackupToIndex(backup)
 }

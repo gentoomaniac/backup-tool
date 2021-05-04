@@ -6,12 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
-	model "github.com/gentoomaniac/backup-tool/pkg/model"
-
+	"github.com/gentoomaniac/backup-tool/pkg/db"
 	log "github.com/sirupsen/logrus"
 )
 
-func Write(data []byte, metadata *model.BlockMeta, basepath string) (int, error) {
+func Write(data []byte, metadata *db.BlockMeta, basepath string) (int, error) {
 	log.WithFields(log.Fields{
 		"block_secret": base64.StdEncoding.EncodeToString(metadata.Secret),
 		"block_hash":   metadata.Hash,

@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/alecthomas/kong"
+	"github.com/gentoomaniac/backup-tool/pkg/db"
 	"github.com/gentoomaniac/logging"
 	"github.com/rs/zerolog/log"
 )
@@ -17,16 +18,12 @@ var (
 var cli struct {
 	logging.LoggingConfig
 
-	Backup struct {
-		BlockSize   int    `short:"b" help:"Data block size in bytes" default:"52428800"`
-		BlockPath   string `short:"p" help:"Where to store the blocks" default:"./blocks/"`
-		Name        string `help:"name of the backup" required:""`
-		Description string `help:"description for the backup"`
-		DBPath      string `short:"d" help:"database file with backup meta information" type:"path"`
-		Secret      string `short:"s" help:"secret"`
-		Nonce       string `short:"n" help:"IV"`
-		Path        string `help:"path to backup" argument:"" required:""`
-	} `cmd:"" help:"Run a backup"`
+	Backup `cmd:"" embed:"" help:"Run a backup"`
+
+	Restore struct {
+		Restore `embed:""`
+	} `cmd:"" help:"Run a restore"`
+
 	Run struct {
 	} `cmd:"" help:"Run the application (default)." default:"1" hidden:""`
 
@@ -43,9 +40,11 @@ func main() {
 	})
 	logging.Setup(&cli.LoggingConfig)
 
+	database, _ := db.NewSQLLite(cli.DBPath)
+
 	switch ctx.Command() {
 	case "backup":
-		backup()
+		backup(database, &cli.Backup)
 
 	default:
 		log.Info().Msg("Default command")
