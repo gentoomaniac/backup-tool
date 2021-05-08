@@ -31,9 +31,8 @@ type BackupArgs struct {
 func filePathWalkDir(root string) ([]string, error) {
 	var files []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if !info.IsDir() {
-			files = append(files, path)
-		}
+		files = append(files, path)
+
 		return nil
 	})
 	return files, err
@@ -95,6 +94,14 @@ func backup(params *BackupArgs) (err error) {
 	var buffer = make([]byte, params.BlockSize)
 	filehasher := sha256.New()
 
+	log.Debug().Msg("Adding backup to index")
+	backup.ID, err = database.AddBackupToIndex(backup)
+	if err != nil {
+		log.Error().Err(err).Msg("Adding backup to index failed")
+		return
+	}
+	log.Debug().Msg(backup.String())
+
 	for _, file := range files {
 		log.Info().Msgf("Backing up file %s", file)
 
@@ -105,15 +112,18 @@ func backup(params *BackupArgs) (err error) {
 		}
 		defer f.Close()
 
-		filemeta := &db.FSObject{}
 		filestat, _ := os.Stat(file)
-		filemeta.Name = filepath.Base(file)
+		filemeta := &db.FSObject{
+			Name:     filepath.Base(file),
+			IsDir:    filestat.IsDir(),
+			FileMode: filestat.Mode(),
+			BackupID: backup.ID,
+		}
 		filemeta.Path, _ = filepath.Abs(filepath.Dir(file))
 		if stat, ok := filestat.Sys().(*syscall.Stat_t); ok {
 			filemeta.User = int(stat.Uid)
 			filemeta.Group = int(stat.Gid)
 		}
-		filemeta.FileMode = filestat.Mode()
 		filesize := filestat.Size()
 
 		for {
@@ -167,12 +177,6 @@ func backup(params *BackupArgs) (err error) {
 		backup.Objects = append(backup.Objects, filemeta)
 
 		f.Close()
-	}
-
-	log.Debug().Msg("Adding backup to index")
-	err = database.AddBackupToIndex(backup)
-	if err != nil {
-		log.Error().Err(err).Msg("Adding backup to index failed")
 	}
 
 	return

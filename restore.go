@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path"
 
 	clitools "github.com/gentoomaniac/backup-tool/pkg/cli"
 	"github.com/gentoomaniac/backup-tool/pkg/db"
@@ -39,7 +41,13 @@ func restore(params *RestoreArgs) {
 		return
 	}
 	for _, obj := range fsobjects {
-		log.Debug().Str("path", obj.Path).Str("name", obj.Name).Str("mode", obj.FileMode.String()).Msg("")
+		//log.Debug().Str("path", obj.Path).Str("name", obj.Name).Str("mode", obj.FileMode.String()).Msg("")
+		if obj.IsDir {
+			targetPath := path.Join(params.DestinationPath, obj.Path)
+			if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+				os.MkdirAll(targetPath, obj.FileMode)
+			}
+		}
 	}
 }
 

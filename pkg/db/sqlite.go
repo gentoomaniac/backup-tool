@@ -3,7 +3,6 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"path"
 	"strconv"
 
 	_ "github.com/mattn/go-sqlite3" // blaa
@@ -56,11 +55,14 @@ func (db *SQLLiteDB) Init() (err error) {
 			"id INTEGER PRIMARY KEY AUTOINCREMENT, " +
 			"name string, " +
 			"path TEXT, " +
+			"isdir INTEGER, " +
 			"filemode INTEGER, " +
 			"uid INTEGER, " +
 			"gid INTEGER, " +
 			"target TEXT, " +
-			"hash BLOB" +
+			"hash BLOB, " +
+			"backupid INTEGER, " +
+			"FOREIGN KEY(backupid) REFERENCES backups(id)" +
 			")")
 	if err != nil {
 		return err
@@ -92,14 +94,6 @@ func (db *SQLLiteDB) Init() (err error) {
 		return err
 	}
 
-	_, err = db.runStatement(
-		"CREATE TABLE IF NOT EXISTS backupobjects (" +
-			"backupid INTEGER, " +
-			"fsobjectid INTEGER, " +
-			"FOREIGN KEY(backupid) REFERENCES backups(id) ," +
-			"FOREIGN KEY(fsobjectid) REFERENCES fsobjects(id)" +
-			")")
-
 	return err
 }
 
@@ -128,8 +122,12 @@ func (db *SQLLiteDB) GetBlockMeta(hash []byte) (*BlockMeta, error) {
 }
 
 func (db *SQLLiteDB) AddFileToIndex(file *FSObject) (int64, error) {
-	result, err := db.rawDB.Exec("INSERT INTO fsobjects (name, path, filemode, uid, gid, target, hash) VALUES(?, ?, ?, ?, ?, ?, ?)",
-		file.Name, file.Path, file.FileMode, file.User, file.Group, "", file.Hash)
+	var isdir = 0
+	if file.IsDir {
+		isdir = 1
+	}
+	result, err := db.rawDB.Exec("INSERT INTO fsobjects (name, path, isdir, filemode, uid, gid, target, hash, backupid) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		file.Name, file.Path, isdir, file.FileMode, file.User, file.Group, "", file.Hash, file.BackupID)
 	if err != nil {
 		return -1, err
 	}
@@ -149,9 +147,13 @@ func (db *SQLLiteDB) GetFSObj(name string, path string) ([]*FSObject, error) {
 
 	for rows.Next() {
 		obj = &FSObject{}
-		err := rows.Scan(&obj.ID, &obj.Name, &obj.Path, &obj.FileMode, &obj.User, &obj.Group, &obj.Target, &obj.Hash)
+		var isdir int
+		err := rows.Scan(&obj.ID, &obj.Name, &obj.Path, &isdir, &obj.FileMode, &obj.User, &obj.Group, &obj.Target, &obj.Hash, &obj.BackupID)
 		if err != nil {
 			return nil, err
+		}
+		if isdir > 0 {
+			obj.IsDir = true
 		}
 		objects = append(objects, obj)
 
@@ -160,24 +162,13 @@ func (db *SQLLiteDB) GetFSObj(name string, path string) ([]*FSObject, error) {
 	return objects, nil
 }
 
-func (db *SQLLiteDB) AddBackupToIndex(backup *Backup) error {
+func (db *SQLLiteDB) AddBackupToIndex(backup *Backup) (int64, error) {
 	result, err := db.rawDB.Exec("INSERT INTO backups (name, description, blocksize, created, expires) VALUES(?, ?, ?, ?, ?)",
 		backup.Name, backup.Description, backup.Blocksize, backup.Timestamp, backup.Expiration)
 	if err != nil {
-		return err
+		return -1, err
 	}
-	backup.ID, err = result.LastInsertId()
-
-	log.Debug().Int("number", len(backup.Objects)).Msg("Number of backup objects")
-	for _, obj := range backup.Objects {
-		log.Debug().Str("name", obj.Name).Int("id", int(obj.ID)).Msg("Assigning file to backup")
-		_, err := db.rawDB.Exec("INSERT INTO backupobjects (backupid, fsobjectid) VALUES(?, ?)",
-			backup.ID, obj.ID)
-		if err != nil {
-			log.Debug().Err(err).Msg("Failed adding obj")
-		}
-	}
-	return err
+	return result.LastInsertId()
 }
 
 func (db *SQLLiteDB) GetBackupBackupById(ID int) (*Backup, error) {
@@ -203,10 +194,6 @@ func (db *SQLLiteDB) GetBackups() (backups []*Backup, err error) {
 	for rows.Next() {
 		backup := &Backup{}
 		rows.Scan(&backup.ID, &backup.Name, &backup.Description, &backup.Blocksize, &backup.Timestamp, &backup.Expiration)
-		log.Debug().
-			Int("id", int(backup.ID)).
-			Str("name", backup.Name).
-			Msg("backup found")
 		backups = append(backups, backup)
 	}
 
@@ -214,20 +201,24 @@ func (db *SQLLiteDB) GetBackups() (backups []*Backup, err error) {
 }
 
 func (db *SQLLiteDB) GetFSObjForBackups(id int64) (objects []*FSObject, err error) {
-	log.Debug().Msgf("SELECT * FROM backupobjects WHERE backupid=%d ", id)
-	rows, err := db.rawDB.Query(fmt.Sprintf("SELECT * FROM backupobjects AS b JOIN fsobjects AS f ON b.fsobjectid=b.fsobjectid WHERE b.backupid=%d ", id))
+	rows, err := db.rawDB.Query(fmt.Sprintf("SELECT * FROM fsobjects WHERE backupid=%d", id))
 	if err != nil {
 		log.Debug().Err(err).Msg("")
 		return nil, err
 	}
 
-	log.Debug().Msg("loadung backup")
 	for rows.Next() {
+		var isdir int
 		obj := &FSObject{}
-		rows.Scan(&obj.ID, &obj.Name, &obj.Path, &obj.FileMode, &obj.User, &obj.Group, &obj.Target, &obj.Hash)
-		log.Debug().Str("name", path.Join(obj.Path, obj.Name)).Msg("")
+		err = rows.Scan(&obj.ID, &obj.Name, &obj.Path, &isdir, &obj.FileMode, &obj.User, &obj.Group, &obj.Target, &obj.Hash, &obj.BackupID)
+		if err != nil {
+			return
+		}
+
+		if isdir > 0 {
+			obj.IsDir = true
+		}
 		objects = append(objects, obj)
 	}
-	log.Debug().Msg("loading done")
 	return
 }
