@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/alecthomas/kong"
-	"github.com/gentoomaniac/backup-tool/pkg/db"
 	"github.com/gentoomaniac/logging"
 	"github.com/rs/zerolog/log"
 )
@@ -18,10 +17,12 @@ var (
 var cli struct {
 	logging.LoggingConfig
 
-	Backup `cmd:"" embed:"" help:"Run a backup"`
+	Backup struct {
+		BackupArgs `embed:""`
+	} `cmd:"" help:"Run a backup"`
 
 	Restore struct {
-		Restore `embed:""`
+		RestoreArgs `embed:""`
 	} `cmd:"" help:"Run a restore"`
 
 	Run struct {
@@ -40,11 +41,15 @@ func main() {
 	})
 	logging.Setup(&cli.LoggingConfig)
 
-	database, _ := db.NewSQLLite(cli.DBPath)
-
 	switch ctx.Command() {
 	case "backup":
-		backup(database, &cli.Backup)
+		err := backup(&cli.Backup.BackupArgs)
+		if err != nil {
+			log.Error().Err(err).Msg("oops!")
+		}
+
+	case "restore":
+		restore(&cli.Restore.RestoreArgs)
 
 	default:
 		log.Info().Msg("Default command")

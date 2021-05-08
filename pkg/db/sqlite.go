@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"path"
 	"strconv"
 
 	_ "github.com/mattn/go-sqlite3" // blaa
@@ -37,7 +38,7 @@ func (db *SQLLiteDB) Init() (err error) {
 	}
 	log.Debug().Msg("Enabling foreign keys")
 
-	db.runStatement(
+	_, err = db.runStatement(
 		"CREATE TABLE IF NOT EXISTS blocks (" +
 			"id INTEGER PRIMARY KEY AUTOINCREMENT, " +
 			"hash BLOB, " +
@@ -46,9 +47,11 @@ func (db *SQLLiteDB) Init() (err error) {
 			"secret BLOB, " +
 			"iv BLOB" +
 			")")
-	log.Debug().Msg("Created block table")
+	if err != nil {
+		return err
+	}
 
-	db.runStatement(
+	_, err = db.runStatement(
 		"CREATE TABLE IF NOT EXISTS fsobjects (" +
 			"id INTEGER PRIMARY KEY AUTOINCREMENT, " +
 			"name string, " +
@@ -59,9 +62,11 @@ func (db *SQLLiteDB) Init() (err error) {
 			"target TEXT, " +
 			"hash BLOB" +
 			")")
-	log.Debug().Msg("Created fsobjects table")
+	if err != nil {
+		return err
+	}
 
-	db.runStatement(
+	_, err = db.runStatement(
 		"CREATE TABLE IF NOT EXISTS fileblocks (" +
 			"ordernumber INTEGER, " +
 			"fsobjectid INTEGER, " +
@@ -69,34 +74,43 @@ func (db *SQLLiteDB) Init() (err error) {
 			"FOREIGN KEY(fsobjectid) REFERENCES fsobjects(id) ," +
 			"FOREIGN KEY(blockid) REFERENCES blocks(id)" +
 			")")
-	log.Debug().Msg("Created fsobject<>block table")
+	if err != nil {
+		return err
+	}
 
-	db.runStatement(
+	_, err = db.runStatement(
 		"CREATE TABLE IF NOT EXISTS backups (" +
 			"id INTEGER PRIMARY KEY AUTOINCREMENT, " +
 			"name TEXT, " +
 			"description TEXT, " +
 			"blocksize INTEGER, " +
 			"created INTEGER, " +
-			"expires INTEGER" +
+			"expires INTEGER," +
+			"UNIQUE(name)" +
 			")")
-	log.Debug().Msg("Created backups table")
+	if err != nil {
+		return err
+	}
 
-	db.runStatement(
+	_, err = db.runStatement(
 		"CREATE TABLE IF NOT EXISTS backupobjects (" +
 			"backupid INTEGER, " +
 			"fsobjectid INTEGER, " +
 			"FOREIGN KEY(backupid) REFERENCES backups(id) ," +
 			"FOREIGN KEY(fsobjectid) REFERENCES fsobjects(id)" +
 			")")
-	log.Debug().Msg("Created backups<>fsobjetcs table")
 
 	return err
 }
 
-func (db *SQLLiteDB) AddBlockToIndex(block *BlockMeta) error {
-	_, err := db.rawDB.Exec("INSERT INTO blocks (hash, name, size, secret, iv) VALUES(?, ?, ?, ?, ?)", block.Hash, block.Name, block.Size, block.Secret, block.IV)
-	return err
+func (db *SQLLiteDB) AddBlockToIndex(block *BlockMeta) (int64, error) {
+	result, err := db.rawDB.Exec("INSERT INTO blocks (hash, name, size, secret, iv) VALUES(?, ?, ?, ?, ?)",
+		block.Hash, block.Name, block.Size, block.Secret, block.IV)
+	if err != nil {
+		return -1, err
+	}
+
+	return result.LastInsertId()
 }
 
 func (db *SQLLiteDB) GetBlockMeta(hash []byte) (*BlockMeta, error) {
@@ -106,18 +120,21 @@ func (db *SQLLiteDB) GetBlockMeta(hash []byte) (*BlockMeta, error) {
 	}
 	var bm BlockMeta
 	for rows.Next() {
-		rows.Scan(bm.ID, bm.Hash, bm.Name, bm.Size, bm.Secret, bm.IV)
-		//fmt.Printf("%d | %x | %x | %d | %x | %x\n", id, rhash, name, size, secret, iv)
+		rows.Scan(&bm.ID, &bm.Hash, &bm.Name, &bm.Size, &bm.Secret, &bm.IV)
 		rows.Close()
 		return &bm, nil
 	}
 	return nil, nil
 }
 
-func (db *SQLLiteDB) AddFileToIndex(file *FSObject) error {
-	_, err := db.rawDB.Exec("INSERT INTO fsobjects (name, path, filemode, uid, gid, target, hash) VALUES(?, ?, ?, ?, ?, ?, ?)",
+func (db *SQLLiteDB) AddFileToIndex(file *FSObject) (int64, error) {
+	result, err := db.rawDB.Exec("INSERT INTO fsobjects (name, path, filemode, uid, gid, target, hash) VALUES(?, ?, ?, ?, ?, ?, ?)",
 		file.Name, file.Path, file.FileMode, file.User, file.Group, "", file.Hash)
-	return err
+	if err != nil {
+		return -1, err
+	}
+
+	return result.LastInsertId()
 }
 
 func (db *SQLLiteDB) GetFSObj(name string, path string) ([]*FSObject, error) {
@@ -144,8 +161,22 @@ func (db *SQLLiteDB) GetFSObj(name string, path string) ([]*FSObject, error) {
 }
 
 func (db *SQLLiteDB) AddBackupToIndex(backup *Backup) error {
-	_, err := db.rawDB.Exec("INSERT INTO backups (name, description, blocksize, created, expires) VALUES(?, ?, ?, ?, ?)",
+	result, err := db.rawDB.Exec("INSERT INTO backups (name, description, blocksize, created, expires) VALUES(?, ?, ?, ?, ?)",
 		backup.Name, backup.Description, backup.Blocksize, backup.Timestamp, backup.Expiration)
+	if err != nil {
+		return err
+	}
+	backup.ID, err = result.LastInsertId()
+
+	log.Debug().Int("number", len(backup.Objects)).Msg("Number of backup objects")
+	for _, obj := range backup.Objects {
+		log.Debug().Str("name", obj.Name).Int("id", int(obj.ID)).Msg("Assigning file to backup")
+		_, err := db.rawDB.Exec("INSERT INTO backupobjects (backupid, fsobjectid) VALUES(?, ?)",
+			backup.ID, obj.ID)
+		if err != nil {
+			log.Debug().Err(err).Msg("Failed adding obj")
+		}
+	}
 	return err
 }
 
@@ -161,4 +192,42 @@ func (db *SQLLiteDB) GetBackupBackupById(ID int) (*Backup, error) {
 	}
 
 	return backup, nil
+}
+
+func (db *SQLLiteDB) GetBackups() (backups []*Backup, err error) {
+	rows, err := db.rawDB.Query("SELECT * FROM backups ORDER BY created DESC")
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		backup := &Backup{}
+		rows.Scan(&backup.ID, &backup.Name, &backup.Description, &backup.Blocksize, &backup.Timestamp, &backup.Expiration)
+		log.Debug().
+			Int("id", int(backup.ID)).
+			Str("name", backup.Name).
+			Msg("backup found")
+		backups = append(backups, backup)
+	}
+
+	return backups, nil
+}
+
+func (db *SQLLiteDB) GetFSObjForBackups(id int64) (objects []*FSObject, err error) {
+	log.Debug().Msgf("SELECT * FROM backupobjects WHERE backupid=%d ", id)
+	rows, err := db.rawDB.Query(fmt.Sprintf("SELECT * FROM backupobjects AS b JOIN fsobjects AS f ON b.fsobjectid=b.fsobjectid WHERE b.backupid=%d ", id))
+	if err != nil {
+		log.Debug().Err(err).Msg("")
+		return nil, err
+	}
+
+	log.Debug().Msg("loadung backup")
+	for rows.Next() {
+		obj := &FSObject{}
+		rows.Scan(&obj.ID, &obj.Name, &obj.Path, &obj.FileMode, &obj.User, &obj.Group, &obj.Target, &obj.Hash)
+		log.Debug().Str("name", path.Join(obj.Path, obj.Name)).Msg("")
+		objects = append(objects, obj)
+	}
+	log.Debug().Msg("loading done")
+	return
 }

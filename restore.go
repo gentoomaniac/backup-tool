@@ -3,22 +3,46 @@ package main
 import (
 	"fmt"
 
+	clitools "github.com/gentoomaniac/backup-tool/pkg/cli"
 	"github.com/gentoomaniac/backup-tool/pkg/db"
 	"github.com/rs/zerolog/log"
 )
 
-type Restore struct {
-	ID     int    `short:"i" help:"ID of the backup to restore"`
-	Path   string `help:"path to backup" argument:"" required:""`
-	DBPath string `short:"d" help:"database file with backup meta information" type:"path"`
+type RestoreArgs struct {
+	ID              int    `short:"i" help:"ID of the backup to restore"`
+	DestinationPath string `help:"path to restore to" argument:"" required:""`
+	DBPath          string `short:"d" help:"database file with backup meta information" type:"path" required:""`
 }
 
-func restore(params *Restore) {
+func restore(params *RestoreArgs) {
 	log.Debug().Msg("restore called")
 	database, _ := db.NewSQLLite(params.DBPath)
 
 	fmt.Println(cli.Restore.ID)
-	backup, _ := database.GetBackupBackupById(params.ID)
+	backups, err := database.GetBackups()
+	if err != nil {
+		log.Error().Err(err).Msg("failed getting backups")
+		return
+	}
 
-	log.Printf("Backup: %s - %s - %d\n", backup.Name, backup.Description, backup.Timestamp)
+	backup, err := clitools.PromptBackups(backups)
+	if err != nil {
+		log.Error().Err(err).Msg("failed selecting backup")
+		return
+	}
+	log.Debug().Str("name", backup.Name).Str("description", backup.Description).Int("created", backup.Timestamp).Msg("backup selected")
+
+	log.Debug().Msg("Loading FSObjects")
+	fsobjects, err := database.GetFSObjForBackups(backup.ID)
+	if err != nil {
+		log.Error().Err(err).Msg("failed getting fs objects")
+		return
+	}
+	for _, obj := range fsobjects {
+		log.Debug().Str("path", obj.Path).Str("name", obj.Name).Str("mode", obj.FileMode.String()).Msg("")
+	}
+}
+
+func restoreFSObject() {
+
 }

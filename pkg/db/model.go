@@ -5,6 +5,7 @@ import (
 )
 
 type Backup struct {
+	ID          int64
 	Blocksize   int
 	Timestamp   int
 	Objects     []*FSObject
@@ -14,7 +15,7 @@ type Backup struct {
 }
 
 type FSObject struct {
-	ID       int
+	ID       int64
 	Name     string
 	Path     string
 	FileMode os.FileMode
@@ -26,7 +27,7 @@ type FSObject struct {
 }
 
 type BlockMeta struct {
-	ID     int
+	ID     int64
 	Hash   []byte
 	Secret []byte
 	IV     []byte

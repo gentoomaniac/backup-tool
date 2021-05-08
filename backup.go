@@ -1,11 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"syscall"
 
@@ -17,24 +17,15 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-type Backup struct {
+type BackupArgs struct {
 	BlockSize   int    `short:"b" help:"Data block size in bytes" default:"52428800"`
 	BlockPath   string `short:"p" help:"Where to store the blocks" default:"./blocks/"`
 	Name        string `help:"name of the backup" required:""`
 	Description string `help:"description for the backup"`
 	Secret      string `short:"s" help:"secret"`
 	Nonce       string `short:"n" help:"IV"`
-	Path        string `help:"path to backup" argument:"" required:""`
-	DBPath      string `short:"d" help:"database file with backup meta information" type:"path"`
-}
-
-func filterFSObjectsByHash(objects []*db.FSObject, hash []byte) *db.FSObject {
-	for _, obj := range objects {
-		if bytes.Equal(obj.Hash, hash) {
-			return obj
-		}
-	}
-	return nil
+	Path        string `help:"path to backup" argument:"" required:"" type:"path"`
+	DBPath      string `short:"d" help:"database file with backup meta information" type:"path" required:""`
 }
 
 func filePathWalkDir(root string) ([]string, error) {
@@ -48,7 +39,16 @@ func filePathWalkDir(root string) ([]string, error) {
 	return files, err
 }
 
-func backup(database db.DB, params *Backup) {
+func backup(params *BackupArgs) (err error) {
+	database, err := db.NewSQLLite(params.DBPath)
+	if err != nil {
+		log.Error().Err(err).Msg("failed opening db")
+	}
+	err = database.Init()
+	if err != nil {
+		log.Error().Err(err).Msg("failed initialising db")
+		return
+	}
 	// encryption / decryption
 	var iv []byte
 	if params.Nonce == "" {
@@ -78,7 +78,11 @@ func backup(database db.DB, params *Backup) {
 		Expiration:  999999999,
 	}
 
-	pathStat, _ := os.Stat(params.Path)
+	pathStat, err := os.Stat(params.Path)
+	if err != nil {
+		log.Error().Err(err).Msg("")
+		return
+	}
 
 	var files []string
 	if pathStat.IsDir() {
@@ -97,7 +101,7 @@ func backup(database db.DB, params *Backup) {
 		f, err := os.Open(file)
 		if err != nil {
 			log.Error().Err(err)
-			return
+			return err
 		}
 		defer f.Close()
 
@@ -137,12 +141,17 @@ func backup(database db.DB, params *Backup) {
 			meta, err := database.GetBlockMeta(blockMetadata.Hash)
 			if err != nil {
 				log.Error().Err(err).Msg("")
-				return
+				return err
 			}
 			if meta == nil {
 				encryptedData, _ := aes256.Encrypt(data, blockSecret, iv)
 				local.Write(encryptedData, blockMetadata, params.BlockPath)
-				database.AddBlockToIndex(blockMetadata)
+				blockMetadata.ID, err = database.AddBlockToIndex(blockMetadata)
+				if err != nil {
+					log.Error().Err(err).Str("block", string(blockMetadata.Name)).Msg("failed adding block to index")
+				}
+			} else {
+				log.Debug().Int("id", int(meta.ID)).Str("name", string(meta.Name)).Msg("Block found")
 			}
 			filemeta.Blocks = append(filemeta.Blocks, blockMetadata)
 		}
@@ -151,17 +160,20 @@ func backup(database db.DB, params *Backup) {
 		filemeta.Hash = hash[:]
 		log.Debug().Str("hash", fmt.Sprintf("%x", filemeta.Hash)).Int("size", int(filesize)).Msg("")
 
-		fsObjects, err := database.GetFSObj(filemeta.Name, filemeta.Path)
+		filemeta.ID, err = database.AddFileToIndex(filemeta)
 		if err != nil {
-			log.Error().Err(err).Msg("")
-		}
-		if filterFSObjectsByHash(fsObjects, filemeta.Hash) == nil {
-			database.AddFileToIndex(filemeta)
+			log.Error().Err(err).Str("file", path.Join(filemeta.Path, filemeta.Name)).Msg("failed adding file to index")
 		}
 		backup.Objects = append(backup.Objects, filemeta)
 
 		f.Close()
 	}
 
-	database.AddBackupToIndex(backup)
+	log.Debug().Msg("Adding backup to index")
+	err = database.AddBackupToIndex(backup)
+	if err != nil {
+		log.Error().Err(err).Msg("Adding backup to index failed")
+	}
+
+	return
 }
