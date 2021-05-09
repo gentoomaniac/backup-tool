@@ -59,7 +59,7 @@ func restore(params *RestoreArgs) {
 
 	for _, obj := range fsobjects {
 		if !obj.IsDir {
-
+			// TODO: get ordered list of fsobject blocks
 			err = restoreFSObject(obj, params.DestinationPath)
 			if err != nil {
 				log.Error().Err(err).Str("file", obj.String()).Msg("restoring object failed")

@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/base64"
-	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -159,24 +158,30 @@ func backup(params *BackupArgs) (err error) {
 				blockMetadata.ID, err = database.AddBlockToIndex(blockMetadata)
 				if err != nil {
 					log.Error().Err(err).Str("block", string(blockMetadata.Name)).Msg("failed adding block to index")
+					return err
 				}
 			} else {
 				log.Debug().Int("id", int(meta.ID)).Str("name", string(meta.Name)).Msg("Block found")
+				blockMetadata = meta
 			}
 			filemeta.Blocks = append(filemeta.Blocks, blockMetadata)
 		}
 
 		hash := filehasher.Sum(nil)
 		filemeta.Hash = hash[:]
-		log.Debug().Str("hash", fmt.Sprintf("%x", filemeta.Hash)).Int("size", int(filesize)).Msg("")
 
 		filemeta.ID, err = database.AddFileToIndex(filemeta)
 		if err != nil {
 			log.Error().Err(err).Str("file", path.Join(filemeta.Path, filemeta.Name)).Msg("failed adding file to index")
+			return err
 		}
-		// for _, block := range filemeta.Blocks {
-		// 	// need to add fileblocks
-		// }
+		for order, block := range filemeta.Blocks {
+			err = database.AddFileBlock(filemeta.ID, block, order)
+			if err != nil {
+				log.Error().Err(err).Str("block", block.String()).Msg("could not add block to fileindex")
+				return err
+			}
+		}
 		backup.Objects = append(backup.Objects, filemeta)
 
 		f.Close()

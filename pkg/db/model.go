@@ -48,3 +48,7 @@ type BlockMeta struct {
 	Name   []byte
 	Size   int
 }
+
+func (b BlockMeta) String() string {
+	return fmt.Sprintf("%d - %x - %d", b.ID, b.Name, b.Size)
+}

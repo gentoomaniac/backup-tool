@@ -113,13 +113,19 @@ func (db *SQLLiteDB) GetBlockMeta(hash []byte) (*BlockMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	var bm BlockMeta
+	bm := &BlockMeta{}
 	for rows.Next() {
 		rows.Scan(&bm.ID, &bm.Hash, &bm.Name, &bm.Size, &bm.Secret, &bm.IV)
 		rows.Close()
-		return &bm, nil
+		return bm, nil
 	}
 	return nil, nil
+}
+
+func (db *SQLLiteDB) AddFileBlock(objectID int64, block *BlockMeta, ordernumber int) error {
+	_, err := db.rawDB.Exec("INSERT INTO fileblocks (ordernumber, fsobjectid, blockid) VALUES(?, ?, ?)",
+		ordernumber, objectID, block.ID)
+	return err
 }
 
 func (db *SQLLiteDB) AddFileToIndex(file *FSObject) (int64, error) {
