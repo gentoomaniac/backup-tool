@@ -174,6 +174,9 @@ func backup(params *BackupArgs) (err error) {
 		if err != nil {
 			log.Error().Err(err).Str("file", path.Join(filemeta.Path, filemeta.Name)).Msg("failed adding file to index")
 		}
+		// for _, block := range filemeta.Blocks {
+		// 	// need to add fileblocks
+		// }
 		backup.Objects = append(backup.Objects, filemeta)
 
 		f.Close()

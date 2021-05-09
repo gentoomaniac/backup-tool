@@ -74,7 +74,8 @@ func (db *SQLLiteDB) Init() (err error) {
 			"fsobjectid INTEGER, " +
 			"blockid INTEGER, " +
 			"FOREIGN KEY(fsobjectid) REFERENCES fsobjects(id) ," +
-			"FOREIGN KEY(blockid) REFERENCES blocks(id)" +
+			"FOREIGN KEY(blockid) REFERENCES blocks(id)," +
+			"PRIMARY KEY (ordernumber, fsobjectid, blockid)" +
 			")")
 	if err != nil {
 		return err

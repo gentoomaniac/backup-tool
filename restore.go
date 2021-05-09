@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path"
 
@@ -40,17 +41,41 @@ func restore(params *RestoreArgs) {
 		log.Error().Err(err).Msg("failed getting fs objects")
 		return
 	}
+
+	log.Debug().Msg("recreating folder structure ...")
 	for _, obj := range fsobjects {
-		//log.Debug().Str("path", obj.Path).Str("name", obj.Name).Str("mode", obj.FileMode.String()).Msg("")
+		targetPath := path.Join(params.DestinationPath, obj.Path, obj.Name)
 		if obj.IsDir {
-			targetPath := path.Join(params.DestinationPath, obj.Path)
+			log.Debug().Str("path", obj.String()).Msg("creating directory")
 			if _, err := os.Stat(targetPath); os.IsNotExist(err) {
-				os.MkdirAll(targetPath, obj.FileMode)
+				err = os.MkdirAll(targetPath, obj.FileMode)
+				if err != nil {
+					log.Error().Err(err).Msg("failed creating directory")
+					return
+				}
 			}
 		}
 	}
+
+	for _, obj := range fsobjects {
+		if !obj.IsDir {
+
+			err = restoreFSObject(obj, params.DestinationPath)
+			if err != nil {
+				log.Error().Err(err).Str("file", obj.String()).Msg("restoring object failed")
+			}
+		}
+	}
+
+	log.Debug().Msg("restoring files ...")
 }
 
-func restoreFSObject() {
+func restoreFSObject(obj *db.FSObject, destination string) error {
+	log.Debug().Str("file", obj.String()).Msg("restoring file")
+	var data []byte
 
+	targetPath := path.Join(destination, obj.Path, obj.Name)
+
+	err := ioutil.WriteFile(targetPath, data, 0644)
+	return err
 }
